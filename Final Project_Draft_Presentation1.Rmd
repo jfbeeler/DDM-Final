@@ -1,0 +1,180 @@
+---
+title: "Citibikes: Krishna, Jonathan, Ann, Serge & Jason"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    sotryboard: true
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(plyr)
+library(dplyr)
+library(ggmap)
+library(ggplot2)
+library(DT)
+library(tidyr)
+library(leaflet)
+```
+Column {.tabset}
+-----------------------------------------------------------------------
+
+### Descriptive Statistics
+
+```{r}
+
+setwd("/Users/beelerenator/Downloads")
+citibikedat <- read.csv("DC Bike Share.csv", stringsAsFactors=F)
+
+## Rides exceed their corresponding time limit and influence of Age ?
+
+Age <- 2015 - citibikedat$birth.year
+
+allowed_time <- 30*60 # regular customers 
+
+customers_exceed <- length(citibikedat$usertype =='Customer') & (citibikedat$tripduration) > allowed_time
+
+customers.e <- length(customers_exceed [customers_exceed== 'TRUE'])
+#customers.e
+
+Z <- ggplot(data = citibikedat, aes(x=Age, y=tripduration, colour = customers_exceed))
+Z + geom_point(size=1) + geom_smooth()
+
+```
+
+-----------------------------------------------------------------------
+### Most Common End Stations for any Start Station
+
+```{r}
+
+
+selectInput( 
+             inputId='station', 
+             label='Choose a Station', 
+             choices= sort(unique(citibikedat$start.station.name)),
+             selected="1 Ave & E 44 St"
+           )
+
+renderPlot({
+
+
+citibike.tbl <- tbl_df(citibikedat)
+
+
+map.subset <- select(citibike.tbl, start.station.name, start.station.id, start.station.latitude, start.station.longitude, end.station.id, end.station.latitude, end.station.longitude)
+
+#top.for.455 <- filter(map.subset, start.station.id == "455" ) 
+
+
+
+top.for.455 <- filter(map.subset, start.station.name == input$station ) 
+
+
+myGroupBy <-group_by(top.for.455, end.station.id)
+myTable <- summarise(myGroupBy, end.station.latitude=unique(end.station.latitude), end.station.longitude=unique(end.station.longitude), total = n(), start.station.id=unique(start.station.id), start.station.latitude=unique(start.station.latitude), start.station.longitude=unique(start.station.longitude)) 
+top.for.455.arranged <- arrange(myTable, desc(total))
+
+top.for.455.arranged.top10 <- top.for.455.arranged[ 1:10 , ]
+
+start.lat <-slice(top.for.455.arranged.top10, 1)
+start.lat$start.station.latitude
+start.lat$start.station.longitude
+
+
+my.location <- c(start.lat$start.station.longitude, start.lat$start.station.latitude)
+my.location
+
+nyc <- get_map( location=my.location, zoom = 14, color ="bw" )
+
+citibike_lines <- ggmap( nyc, extent="device", xmin=min(top.for.455.arranged.top10$end.station.longitude), ymin=min(top.for.455.arranged.top10$end.station.latitude), xmax=max(top.for.455.arranged.top10$end.station.longitude), ymax=max(top.for.455.arranged.top10$end.station.latitude))
+
+citibike_lines <- citibike_lines + geom_segment(data=top.for.455.arranged.top10, 
+                                       aes(y = start.station.latitude, x = start.station.longitude, yend = end.station.latitude, xend = end.station.longitude), 
+                                       color="red",
+                                       size=.5 ) +
+                                       geom_point (data=top.for.455.arranged.top10,                                                    aes(x = end.station.longitude, y =                                                           end.station.latitude), size = 2, color="darkred", alpha=0.5) 
+#+ stat_density2d( data=top.for.455.arranged.top10, aes(x=end.station.longitude ,y=end.station.latitude, fill=..level..), bins=10, geom="polygon", alpha=0.2)
+
+#+ xlim(c(top.for.455.arranged.top10$start.station.longitude), (top.for.455.arranged.top10$start.station.longitude)) + ylim(c(top.for.455.arranged.top10$start.station.latitude),(top.for.455.arranged.top10$start.station.latitude))
+
+citibike_lines
+
+})
+
+#geom_point(data=top.for.455.arranged.top10, mapping=aes(x=intelligence, y=beauty, shape=gender, color=gender, size=speed)) +
+#opts(title="geom_point", plot.title=theme_text(size=40, vjust=1.5))
+
+#log.strength <- NULL
+#for( i in 1:nrow(dat) )
+#{
+#   log.strength[i] <- log( dat$strength[i] )
+
+#route(from=start,to=dest,mode = c("bicycling"),structure = c("route")) 
+
+#}
+
+```
+
+-----------------------------------------------------------------------
+###  Raw Data
+
+```{r}
+citibikedat.subset <-subset(citibikedat, select = c(starttime, stoptime, start.station.name, end.station.name, bikeid),
+    start.station.id < 100 & end.station.id < 100)
+
+datatable(citibikedat.subset,
+    colnames = c('Start Time', 'Stop Time', 'Start Station Name', 'End Station Name', 'Bike ID'),
+    class = "compact"
+  )
+
+```
+
+-----------------------------------------------------------------------
+###  Leaflet Map
+```{r}
+#Data subsets
+dat <- data.frame (lng=citibikedat$start.station.longitude [1:100], lat = citibikedat$start.station.latitude [1:100], name = citibikedat$start.station.name [1:100])
+
+connects <- data.frame (lng = c(citibikedat$start.station.longitude [1:100], citibikedat$end.station.longitude [1:100]), lat = c(citibikedat$start.station.latitude [1:100], citibikedat$end.station.latitude [1:100]))
+
+##Create map
+nyc <- leaflet ()
+
+nyc <- leaflet (data = dat) %>% addTiles () %>%
+  
+##Add tourism points  
+addCircleMarkers (nyc, lng = c(-73.9851,-73.9969,-73.9634,-73.9857,-73.9654), lat = c(40.7589,40.7061,40.7794,40.7484,40.7829), popup = c("Times Square", "Brooklyn Bridge", "Metropolitan Museum of Art","Empire State Building","Central Park"),
+	radius = 4,
+	color = "navy",
+	stroke = FALSE,
+	fillOpacity = 0.5,
+	group = "Tourist Attractions") %>%
+  
+##Add CitiBike data  
+  addCircleMarkers (~lng, ~lat, popup = ~name,
+  radius = 2,
+  color = "red",
+  stroke = FALSE,
+  fillOpacity = 0.5,
+  group = "CitiBike Stations") %>%
+  
+  addPolylines(data = connects, ~lng, ~lat,
+  weight = 1,
+  color = "#E68588",
+  group = "Routes") %>%
+  
+##Toggle points
+addLayersControl (
+  overlayGroups = c("Tourist Attractions", "CitiBike Stations", "Routes"),
+  options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+
+hideGroup ("Routes")
+  
+##Edit basemap
+nyc %>% addProviderTiles("CartoDB.Positron")
+```
+
